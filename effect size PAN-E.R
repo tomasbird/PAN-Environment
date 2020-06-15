@@ -1,20 +1,25 @@
 ######################################################################################################################
 ######################################################################################################################
 ######################################################################################################################
-data=read.csv("test.data.PAN-E.csv")
 
+#### Load in data ####
+data <- read.csv("data/test.data.PAN-E.csv")
+
+#### Load in libraries ####
+library(nlme)
 
 ####function for effect size
-partial.r<-function(t.val,df){
-  r<-t.val/sqrt((t.val)^2+df)
-  names(r)<-"effect size r"
-  return(r)}
+partial.r <- function (t.val, df) {
+  r < -t.val / sqrt((t.val) ^ 2 + df)
+  names(r) <- "effect size r"
+  return(r)
+  }
 
 ####using quasibinomial and quasipoisson because this provide a t-stastic as an output, as compared to a z-statistic
 ####so this is thus comparable across lm, glm, lme and glmmPQL
 
 ####Example 1, study that is a time-based regresson over the covid period
-y=subset(data,Study_ID=="1")
+y = subset(data, Study_ID == "1")
 
 ######################################################################################################################
 ####can use with different data if we have a comparable "t" from general linear model or linear model
@@ -23,45 +28,45 @@ y=subset(data,Study_ID=="1")
 #Schielzelth 2010 in Methods Ecol & Evol
 #Centering predictor data (time in this case)
 
-y$Treatment<-as.numeric(as.character(y$Treatment)) 
+y$Treatment <- as.numeric(as.character(y$Treatment)) 
 y$C.Treatment <- y$Treatment - mean(y$Treatment)
 
 #m1 is a linear model of the response which is quasipoisson
 #a.1 reports the t value effect size of the linear fit (and this structure can allow for covariates, if needed without modifying the below)
 
-m1 <- glm(Response ~ C.Treatment,family=as.character(y$Model[1]),data=y)
+m1 <- glm(Response ~ C.Treatment, family = as.character(y$Model[1]), data = y)
 #extract the t-value for the predictor (in this case time)
 
-a.1 <- summary(m1)$coef[2,3]
+a.1 <- summary(m1)$coef[2, 3]
 #compute effect size
 r.1 <- partial.r(a.1, df = 1)		# using t value corresponding to coefficient for linear term in the model
 
 # apply fisher z transformation (bounded by infinity so better for meta-analysis):
 #see this transformation in Wikipedia!
 
-es.1 <- 0.5*log((1 + r.1)/(1 - r.1))
+es.1 <- 0.5 * log((1 + r.1) / (1 - r.1))
 es.1
 #END of Example 1
 
 ####Example 2, study that is a comparison of a gaussian response for a pre- and during-covid time period
-y=subset(data,Study_ID=="2")
-y$Treatment<-as.numeric(as.character(y$Treatment)) 
+y = subset(data, Study_ID == "2")
+y$Treatment <- as.numeric(as.character(y$Treatment)) 
 y$C.Treatment <- y$Treatment - mean(y$Treatment)
-m1 <- glm(Response ~ C.Treatment,family=as.character(y$Model[1]),data=y)
-a.1 <- summary(m1)$coef[2,3]
+m1 <- glm(Response ~ C.Treatment, family = as.character(y$Model[1]), data = y)
+a.1 <- summary(m1)$coef[2, 3]
 r.1 <- partial.r(a.1, df = 1)		
-es.1 <- 0.5*log((1 + r.1)/(1 - r.1))
+es.1 <- 0.5 * log((1 + r.1) / (1 - r.1))
 es.1
 #END of Example 2
 
 ####Example 3, study that is a comparison of a quasipoisson response for a during- and post-covid time period
-y=subset(data,Study_ID=="3")
-y$Treatment<-as.numeric(as.character(y$Treatment)) 
+y = subset(data, Study_ID == "3")
+y$Treatment <- as.numeric(as.character(y$Treatment)) 
 y$C.Treatment <- y$Treatment - mean(y$Treatment)
-m1 <- glm(Response ~ C.Treatment,family=as.character(y$Model[1]),data=y)
-a.1 <- summary(m1)$coef[2,3]
+m1 <- glm(Response ~ C.Treatment, family = as.character(y$Model[1]), data = y)
+a.1 <- summary(m1)$coef[2, 3]
 r.1 <- partial.r(a.1, df = 1)
-es.1 <- 0.5*log((1 + r.1)/(1 - r.1))
+es.1 <- 0.5 * log((1 + r.1) / (1 - r.1))
 es.1
 #END of Example 3
 

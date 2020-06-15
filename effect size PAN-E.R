@@ -71,34 +71,34 @@ es.1
 #END of Example 3
 
 ####Example 4, study that is a comparison of a quasipoisson response for a spatial block/treatment during the lockdown, where reference is the control, in this case "A"
-y=subset(data,Study_ID=="4")
+y = subset(data,Study_ID == "4")
 y$C.Treatment <- y$Treatment
-m1 <- glm(Response ~ C.Treatment,family=as.character(y$Model[1]),data=y)
-a.1 <- summary(m1)$coef[2,3]
+m1 <- glm(Response ~ C.Treatment, family = as.character(y$Model[1]), data = y)
+a.1 <- summary(m1)$coef[2, 3]
 r.1 <- partial.r(a.1, df = 1)		# using t value corresponding to coefficient for linear term in the model
-es.1 <- 0.5*log((1 + r.1)/(1 - r.1))
+es.1 <- 0.5 * log((1 + r.1) / (1 - r.1))
 es.1
 #END of Example 4
 
 ####Example 5, study that is a comparison of a quasibinomical response for a spatial block/treatment during the lockdown, where reference is the control, in this case "A"
-y=subset(data,Study_ID=="5")
+y = subset(data,Study_ID == "5")
 y$C.Treatment <- y$Treatment
-m1 <- glm(Response ~ C.Treatment,family=as.character(y$Model[1]),data=y)
-a.1 <- summary(m1)$coef[2,3]
+m1 <- glm(Response ~ C.Treatment, family = as.character(y$Model[1]), data = y)
+a.1 <- summary(m1)$coef[2, 3]
 r.1 <- partial.r(a.1, df = 1)		# using t value corresponding to coefficient for linear term in the model
-es.1 <- 0.5*log((1 + r.1)/(1 - r.1))
+es.1 <- 0.5 * log((1 + r.1) / (1 - r.1))
 es.1
 #END of Example 5
 
 ####Example 6, study that is a comparison of a guassian response for a pre- versus during-lockdown design, where each has a temporal trend 
-y=subset(data,Study_ID=="6")
-y$Treatment<-as.numeric(as.character(y$Treatment)) 
-y$Within.Treatment.Time.Step<-as.numeric(as.character(y$Within.Treatment.Time.Step)) 
+y = subset(data, Study_ID == "6")
+y$Treatment <- as.numeric(as.character(y$Treatment)) 
+y$Within.Treatment.Time.Step <- as.numeric(as.character(y$Within.Treatment.Time.Step)) 
 y$C.Treatment <- y$Treatment - mean(y$Treatment)
-m1 <- glm(Response ~ C.Treatment*Within.Treatment.Time.Step,family=as.character(y$Model[1]),data=y)
-a.1 <- summary(m1)$coef[2,3]
+m1 <- glm(Response ~ C.Treatment * Within.Treatment.Time.Step, family = as.character(y$Model[1]), data = y)
+a.1 <- summary(m1)$coef[2, 3]
 r.1 <- partial.r(a.1, df = 1)		# using t value corresponding to coefficient for linear term in the model
-es.1 <- 0.5*log((1 + r.1)/(1 - r.1))
+es.1 <- 0.5 * log((1 + r.1) / (1 - r.1))
 es.1
 #END of Example 6
 

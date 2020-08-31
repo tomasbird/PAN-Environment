@@ -1,0 +1,29 @@
+Linear mixed-effects model fit by REML
+ Data: small_chl 
+     AIC      BIC    logLik
+  302353 302410.1 -151170.5
+
+Random effects:
+ Formula: ~1 | Lat
+        (Intercept) Residual
+StdDev:   0.2061025 1.088563
+
+Correlation Structure: ARMA(0,2)
+ Formula: ~1 | Lat/Month 
+ Parameter estimate(s):
+    Theta1     Theta2 
+0.01124977 0.00173969 
+Fixed effects: Chl ~ Covid 
+                  Value   Std.Error    DF   t-value p-value
+(Intercept)  0.31127529 0.010476209 98798 29.712589  0.0000
+Covidbefore -0.00377787 0.009289888 98798 -0.406665  0.6843
+ Correlation: 
+            (Intr)
+Covidbefore -0.74 
+
+Standardized Within-Group Residuals:
+       Min         Q1        Med         Q3        Max 
+-1.1290700 -0.1568478 -0.1005414 -0.0405047 67.4060504 
+
+Number of Observations: 100000
+Number of Groups: 1201 

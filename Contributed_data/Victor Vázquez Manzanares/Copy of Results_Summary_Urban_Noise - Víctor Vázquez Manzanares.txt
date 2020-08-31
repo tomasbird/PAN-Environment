@@ -1,0 +1,29 @@
+Linear mixed-effects model fit by REML
+ Data: urban_noise 
+       AIC      BIC    logLik
+  92501.83 92549.69 -46244.91
+
+Random effects:
+ Formula: ~1 | ID
+        (Intercept) Residual
+StdDev:    4.403447 2.075734
+
+Correlation Structure: ARMA(0,2)
+ Formula: ~1 | ID/Julian_day 
+ Parameter estimate(s):
+    Theta1     Theta2 
+0.14632559 0.00508852 
+Fixed effects: UrbanNoise ~ Covid 
+               Value Std.Error    DF  t-value p-value
+(Intercept) 58.46974 0.7153232 21498 81.73892       0
+Covidbefore  2.97309 0.0403558 21498 73.67212       0
+ Correlation: 
+            (Intr)
+Covidbefore -0.048
+
+Standardized Within-Group Residuals:
+        Min          Q1         Med          Q3         Max 
+-5.70583875 -0.50614483  0.03303757  0.50888139 10.59161018 
+
+Number of Observations: 21537
+Number of Groups: 38 

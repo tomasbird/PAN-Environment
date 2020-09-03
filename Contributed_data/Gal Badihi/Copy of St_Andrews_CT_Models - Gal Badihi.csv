@@ -1,0 +1,24 @@
+Model number ,formula,Data,Fixed effect,Value,Std.Error,t-value,p-value,DF,Notes
+1,"lme(data = dct, Bird~Phase+Loc+Phase*Loc, random = ~1|Camera)",Full data set,(Intercept),3.727273,2.666775,1.3976704,0.1654,97,
+,,,PhaseB,-0.393939,2.720452,-0.1448066,0.8852,97,
+,,,PhaseC,-2.227273,3.028304,-0.7354851,0.4638,97,
+,,,LocUrban,3.1421,3.354116,0.9367892,0.5208,1,
+,,,PhaseB:LocUrban,-1.900945,3.376822,-0.5629389,0.5748,97,
+,,,PhaseC:LocUrban,3.150266,3.680725,0.8558819,0.3942,97,
+2,"glm(data = Jeff, Cat~Phase, family=stats::quasipoisson)",Jeff's CT (urban),(Intercept),0.619,0.2724,2.272,0.02813 *,,Null deviance: 58.984 on 45 df; Residual deviance: 46.127 on 43 df
+,,,PhaseB,-0.5281,0.3408,-1.549,0.12863,,
+,,,PhaseC,-1.5635,0.4605,-3.395,0.00148 **,,
+3,"glm(data = Jeff, Bird~Phase+Cat+Phase*Cat, family=stats::quasipoisson)",Jeff's CT (urban),(Intercept),12.6,2029.94,0.006,0.995,,Null deviance: 275 on 45 df; Residual deviance: 165.76 on 40 df
+,,,PhaseB,-10.87,2029.94,-0.005,0.996,,
+,,,PhaseC,-10.54,2029.94,-0.005,0.996,,
+,,,Cat,-13.98,2029.94,-0.007,0.995,,
+,,,PhaseB:Cat,13.51,2029.94,0.007,0.995,,
+,,,PhaseC:Cat,13.99,2029.94,0.007,0.995,,
+4,"glm(data = Jeff, Bird~Cat, family=stats::quasipoisson)",Jeff's CT (urban),(Intercept),1.9695,0.1976,9.965,0.000000000000745 ***,,Null deviance: 275 on 45 df; Residual deviance: 224.1 on 44 df
+,,,Cat,-0.5939,0.2329,-2.55,0.0143 *,,
+5,"glm(data = Gal, Human~Phase, family=stats::quasipoisson)",Gal's CT (urban),(Intercept),4.0483,0.1262,32.068,<2e-16 ***,,Null deviance: 299.65 on 26 df; Residual deviance: 239.36  on 24 df
+,,,PhaseB,-0.1323,0.1847,-0.716,0.4809,,
+,,,PhaseC,-0.5826,0.2381,-2.446,0.0221 *,,
+6,"glm(N~Phase, data = Gct, family = stats::quasipoisson)",Gal's CT (urban),(Intercept),0.30969,0.0228,13.584,<2.00E-16 ***,,Null deviance: 420.88 on 1298 df; Residual deviance: 414.70 on 1296 df
+,,,PhaseB,0.01993,0.03319,0.601,0.548249,,
+,,,PhaseC,0.1564,0.0407,3.842,0.000128 ***,,

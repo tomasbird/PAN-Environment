@@ -1,0 +1,29 @@
+Linear mixed-effects model fit by REML
+ Data: air_quality_specie 
+       AIC      BIC    logLik
+  169602.1 169648.8 -84795.07
+
+Random effects:
+ Formula: ~1 | City
+        (Intercept) Residual
+StdDev:    25.42589 29.19758
+
+Correlation Structure: ARMA(0,2)
+ Formula: ~1 | City/julian_day 
+ Parameter estimate(s):
+   Theta1    Theta2 
+0.2019707 0.1289306 
+Fixed effects: median ~ Covid 
+               Value Std.Error    DF   t-value p-value
+(Intercept) 58.66858  5.586564 17720 10.501728  0.0000
+Covidbefore -0.87826  0.621714 17720 -1.412647  0.1578
+ Correlation: 
+            (Intr)
+Covidbefore -0.097
+
+Standardized Within-Group Residuals:
+        Min          Q1         Med          Q3         Max 
+-3.19898550 -0.50687253 -0.08520694  0.28369766 14.79978552 
+
+Number of Observations: 17742
+Number of Groups: 21 

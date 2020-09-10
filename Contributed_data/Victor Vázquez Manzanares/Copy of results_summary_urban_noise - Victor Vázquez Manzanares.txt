@@ -1,0 +1,31 @@
+Víctor Vázquez & Christian Requena-Mesa
+
+Linear mixed-effects model fit by REML
+ Data: urban_noise 
+       AIC      BIC    logLik
+  90145.83 90193.69 -45066.91
+
+Random effects:
+ Formula: ~1 | ID
+        (Intercept) Residual
+StdDev:    4.402188 1.962549
+
+Correlation Structure: ARMA(0,2)
+ Formula: ~1 | ID/Julian_day 
+ Parameter estimate(s):
+      Theta1       Theta2 
+ 0.135649812 -0.003278655 
+Fixed effects: UrbanNoise ~ Covid 
+               Value Std.Error    DF   t-value p-value
+(Intercept) 61.58556 0.7143108 21498  86.21675       0
+Covidafter  -3.29872 0.0356663 21498 -92.48853       0
+ Correlation: 
+           (Intr)
+Covidafter -0.009
+
+Standardized Within-Group Residuals:
+         Min           Q1          Med           Q3          Max 
+-6.110706608 -0.551396781 -0.005322319  0.486912593 11.129575191 
+
+Number of Observations: 21537
+Number of Groups: 38 

@@ -1,0 +1,14 @@
+﻿Regression coefficients averaged over the region 20-42 N/108-125 E for ln(NO2),,,,,
+c_0 (intercept),c_pre (trend before Jan. 2013),c_post (trend before Jan. 2013),c_CNY (holiday effect),c_cos(seasonal cycle 1),c_sin (seasonal cycle 2)
+36,-0.0025,-0.0024 ,-0.33,0.53,0.01
+,,,,,
+Standard error calculated as the difference between the regionally-averaged observed and regressed ln(NO2) values for each month from January 2005 to December 2019,,,,,
+0.097,,,,,
+,,,,,
+Regionally-averaged results for 2020,,,,,
+,Observed value,Expected (regressed) value,Difference,t-value (Difference/standard error),
+20-Jan,35.974,36.077,-0.103,-1.06,
+20-Feb,35.57,36.145,-0.575,-5.92,
+20-Mar,35.909,36.054,-0.145,-1.5,
+20-Apr,35.847,35.787,0.06,0.62,
+20-May,35.541,35.519,0.022,0.23,

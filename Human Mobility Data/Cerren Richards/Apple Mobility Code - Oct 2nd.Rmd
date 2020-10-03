@@ -1,0 +1,448 @@
+---
+title: "Apple Mobility Code - Oct 2nd"
+author: "Tom Bird and Cerren Richards"
+date: "02/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Set up the Apple data
+
+```{r}
+library(dplyr)
+library(reshape2)
+library(countrycode)
+library(RCurl)
+library(mgcv)
+library(lubridate)
+library(ggplot2)
+
+apple = read.csv("applemobilitytrends-2020-08-26.csv") %>% 
+  subset(grepl("country", geo_type) & transportation_type=="driving") %>%
+  melt(id.vars=1:6) %>%
+  mutate(variable=gsub("X", "", variable), country=region) %>%
+  mutate(variable=gsub("\\.", "/", variable)) %>%
+  mutate(Date=as.Date(variable, format="%Y/%m/%d")) %>%
+  mutate(ISO3=countrycode(sourcevar=region, origin="country.name", destination="iso3c"))
+
+
+```
+
+### COVID-19 Confinement Data
+
+The Oxford Covid-19 Government Response Tracker (OxCGRT) has compiled dates for eight different confinement types and their severity (0-4).
+
+Data info: https://github.com/OxCGRT/covid-policy-tracker
+```{r}
+
+confinement <- getURL("https://raw.githubusercontent.com/OxCGRT/covid-policy-tracker/master/data/OxCGRT_latest_withnotes.csv")
+
+
+# Set up the confinement data for further analyses
+conf <- read.csv(text=confinement) %>%
+  mutate(julian=(strptime(Date, "%Y%m%d")$yday)+1) %>% # assign Julian Date
+  mutate(Date=as.Date(strptime(Date, "%Y%m%d"))) %>% # Set as a date
+  mutate(weekday=weekdays(Date)) %>% # Identify weekdays
+  mutate(weekend=ifelse(grepl("Sat|Sun", weekday), 1,0)) %>% # Assign columns for weekends
+  select(ISO3=CountryCode, RegionName, Date, julian, weekday, weekend, # Select columns
+         C1_School.closing, C2_Workplace.closing, C3_Cancel.public.events,
+         C4_Restrictions.on.gatherings, C5_Close.public.transport,
+         C6_Stay.at.home.requirements, C7_Restrictions.on.internal.movement)
+
+library(naniar)
+# Remove subregions
+conf<- conf %>% replace_with_na(replace = list(RegionName = ""))
+conf<- conf[is.na(conf$RegionName),]
+
+applemobconf=left_join(apple, conf)
+
+# Sensitivity analysis to identify the best cut off dates
+# We select May because this is when most countries begin to ease the restrictions
+maystart <- 122 # Julian date for May 1st
+maymid <- 136 # May 15
+mayend <- 152 # May 30
+
+
+# Subset the apple data
+applestart <- subset(applemobconf,  julian <= maystart)
+applemid <-   subset(applemobconf,  julian <= maymid)
+appleend <-   subset(applemobconf,  julian <= mayend)
+
+```
+
+### Extract Model Values
+```{r}
+conftypes=c("C1_School.closing", "C2_Workplace.closing", "C3_Cancel.public.events",
+            "C4_Restrictions.on.gatherings", "C5_Close.public.transport",
+            "C6_Stay.at.home.requirements", "C7_Restrictions.on.internal.movement")
+
+
+###_________________________________________
+### MID MAY
+###_________________________________________
+
+country=ISO3=restriction=level=date=character()
+aics=R2=t.lockdown=numeric()
+
+country.results=subdat.list=chosen_mid=data.frame()
+mod.list=country.results=list()
+
+## Extract the model values for each country
+for(i in unique(applemid$region)){
+  for(j in conftypes){
+    subdat=subset(applemid, region==i)  
+    locklevels=unique(subdat[[j]])
+    locklevels=locklevels[which(locklevels %in% c(1:10))]
+    for(k in locklevels){
+      subdat$lockdown=(subdat[[j]]==k)*1
+      subdat$lockdown.type=j
+      subdat$level=k
+      mod=try(gam(value ~ lockdown + weekend + s(julian), data=subdat))
+      if(!class(mod)[1]=="try-error"){
+        country=c(country,i)
+        ISO3=c(ISO3, subdat$ISO3[1])
+        restriction=c(restriction,j)
+        level=c(level,k)
+        aics=c(aics,AIC(mod))
+        R2=c(R2, summary(mod)$r.sq)
+        t.lockdown=c(t.lockdown, summary(mod)$p.table["lockdown","t value"])
+        date=c(date, subdat$variable[min(which(subdat$lockdown==1))])
+        
+        # save models and subdata
+        mod.list[[paste(i,j,k, sep="_")]]=mod
+        subdat.list=rbind(subdat.list, subset(subdat, select=c("country", "Date", "julian", "weekday", "weekend", "lockdown.type","level",  "value", "lockdown")))
+        
+      }
+    }
+  }
+  
+  # select country top model
+  country.out=data.frame(country, ISO3, restriction,level, aics, R2, t.lockdown, date) %>%
+    mutate(Date=ymd(date)) %>%
+    mutate(model=paste(country, restriction, level, sep="_")) %>%
+    subset(country==i) %>% 
+    arrange(aics)
+  
+  country.results=rbind(country.results,country.out)
+  
+  country.out=subset(country.out, t.lockdown==min(t.lockdown))
+  country.out$model = with(country.out, paste(country, restriction, level, sep="_"))
+  
+  # add top model outputs to list
+  chosen_mid=rbind(chosen_mid,country.out)
+  
+  print(paste(i))
+}
+
+
+# Assign Julian date for the confinement date
+chosen_mid$julian_lockdown <- (strptime(chosen_mid$Date, "%Y-%m-%d")$yday) + 1 
+
+chosen_mid<- distinct(chosen_mid, country, .keep_all = TRUE)
+
+# Find median AIC score for all countries
+median(chosen_mid$aics) #864
+
+
+
+###_________________________________________
+### END MAY
+###_________________________________________
+
+country=ISO3=restriction=level=date=character()
+aics=R2=t.lockdown=numeric()
+
+country.results=subdat.list=chosen_end=data.frame()
+mod.list=country.results=list()
+
+## Extract the model values for each country
+for(i in unique(appleend$region)){
+  for(j in conftypes){
+    subdat=subset(appleend, region==i)  
+    locklevels=unique(subdat[[j]])
+    locklevels=locklevels[which(locklevels %in% c(1:10))]
+    for(k in locklevels){
+      subdat$lockdown=(subdat[[j]]==k)*1
+      subdat$lockdown.type=j
+      subdat$level=k
+      mod=try(gam(value ~ lockdown + weekend + s(julian), data=subdat))
+      if(!class(mod)[1]=="try-error"){
+        country=c(country,i)
+        ISO3=c(ISO3, subdat$ISO3[1])
+        restriction=c(restriction,j)
+        level=c(level,k)
+        aics=c(aics,AIC(mod))
+        R2=c(R2, summary(mod)$r.sq)
+        t.lockdown=c(t.lockdown, summary(mod)$p.table["lockdown","t value"])
+        date=c(date, subdat$variable[min(which(subdat$lockdown==1))])
+        
+        # save models and subdata
+        mod.list[[paste(i,j,k, sep="_")]]=mod
+        subdat.list=rbind(subdat.list, subset(subdat, select=c("country", "Date", "julian", "weekday", "weekend", "lockdown.type","level",  "value", "lockdown")))
+        
+      }
+    }
+  }
+  
+  # select country top model
+  country.out=data.frame(country, ISO3, restriction,level, aics, R2, t.lockdown, date) %>%
+    mutate(Date=ymd(date)) %>%
+    mutate(model=paste(country, restriction, level, sep="_")) %>%
+    subset(country==i) %>% 
+    arrange(aics)
+  
+  country.results=rbind(country.results,country.out)
+  
+  country.out=subset(country.out, t.lockdown==min(t.lockdown))
+  country.out$model = with(country.out, paste(country, restriction, level, sep="_"))
+  
+  # add top model outputs to list
+  chosen_end=rbind(chosen_end,country.out)
+  
+  print(paste(i))
+}
+
+
+# Assign Julian date for the confinement date
+chosen_end$julian_lockdown <- (strptime(chosen_end$Date, "%Y-%m-%d")$yday) + 1 
+
+chosen_end<- distinct(chosen_end, country, .keep_all = TRUE)
+
+# Find median AIC score for all countries
+median(chosen_end$aics) #972
+
+
+###_________________________________________
+### START MAY
+###_________________________________________
+
+country=ISO3=restriction=level=date=character()
+aics=R2=t.lockdown=numeric()
+
+country.results=subdat.list=chosen_start=data.frame()
+mod.list=country.results=list()
+
+## Extract the model values for each country
+for(i in unique(applestart$region)){
+  for(j in conftypes){
+    subdat=subset(applestart, region==i)  
+    locklevels=unique(subdat[[j]])
+    locklevels=locklevels[which(locklevels %in% c(1:10))]
+    for(k in locklevels){
+      subdat$lockdown=(subdat[[j]]==k)*1
+      subdat$lockdown.type=j
+      subdat$level=k
+      mod=try(gam(value ~ lockdown + weekend + s(julian), data=subdat))
+      if(!class(mod)[1]=="try-error"){
+        country=c(country,i)
+        ISO3=c(ISO3, subdat$ISO3[1])
+        restriction=c(restriction,j)
+        level=c(level,k)
+        aics=c(aics,AIC(mod))
+        R2=c(R2, summary(mod)$r.sq)
+        t.lockdown=c(t.lockdown, summary(mod)$p.table["lockdown","t value"])
+        date=c(date, subdat$variable[min(which(subdat$lockdown==1))])
+        
+        # save models and subdata
+        mod.list[[paste(i,j,k, sep="_")]]=mod
+        subdat.list=rbind(subdat.list, subset(subdat, select=c("country", "Date", "julian", "weekday", "weekend", "lockdown.type","level",  "value", "lockdown")))
+        
+      }
+    }
+  }
+  
+  # select country top model
+  country.out=data.frame(country, ISO3, restriction,level, aics, R2, t.lockdown, date) %>%
+    mutate(Date=ymd(date)) %>%
+    mutate(model=paste(country, restriction, level, sep="_")) %>%
+    subset(country==i) %>% 
+    arrange(aics)
+  
+  country.results=rbind(country.results,country.out)
+  
+  country.out=subset(country.out, t.lockdown==min(t.lockdown))
+  country.out$model = with(country.out, paste(country, restriction, level, sep="_"))
+  
+  # add top model outputs to list
+  chosen_start=rbind(chosen_start,country.out)
+  
+  print(paste(i))
+}
+
+
+# Assign Julian date for the confinement date
+chosen_start$julian_lockdown <- (strptime(chosen_start$Date, "%Y-%m-%d")$yday) + 1 
+
+chosen_start<- distinct(chosen_start, country, .keep_all = TRUE)
+
+# Find median AIC score for all countries
+median(chosen_start$aics) #783
+
+
+```
+
+
+### Plot to visualise the dates selected
+```{r}
+
+# Join the lockdown dates to the full Google data for plotting
+plots <- left_join(applestart, chosen_start, by = c("country", "ISO3"))
+
+library(ggplot2)
+library(ggforce)
+## PLOT
+ggplot(data = plots, aes(x=julian, y=value)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 1)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+ggplot(data = plots, aes(x=julian, y=value)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 2)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+
+```
+
+### Find the date for countries that dont work
+
+The models above did not select appropriate dates. We therefore manually select the dates for the following countries:
+
+Cambodia, Italy, Japan, Slovakia, Turkey
+
+```{r}
+
+# Subset the countries that the model did not select an appropriate confinement date
+
+# Set Julian date
+country.results$julian_lockdown <- (strptime(country.results$Date, "%Y-%m-%d")$yday) + 1 
+
+## Cambodia_C4_Restrictions.on.gatherings_4 = Julian day = 77
+ggplot(data = filter(subdat.list, country == "Cambodia"), aes(x=julian, y=value)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Cambodia"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Cambodia"))
+
+
+## Italy_C5_Close.public.transport_1 = Julian day = 71
+ggplot(data = filter(subdat.list, country == "Italy"), aes(x=julian, y=value)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Italy"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Italy"))
+
+
+## Japan_C6_Stay.at.home.requirements_1 = Julian day = 98
+ggplot(data = filter(subdat.list, country == "Japan"), aes(x=julian, y=value)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Japan"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Japan"))
+
+
+## Slovakia_C3_Cancel.public.events_2 = Julian day = 70
+ggplot(data = filter(subdat.list, country == "Slovakia"), aes(x=julian, y=value)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Slovakia"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Slovakia"))
+
+## Turkey_C7_Restrictions.on.internal.movement_1 = Julian day = 78
+ggplot(data = filter(subdat.list, country == "Turkey"), aes(x=julian, y=value)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Turkey"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Turkey"))
+
+
+corrections <- tibble(country = c("Cambodia","Italy", "Japan", "Slovakia","Turkey"), 
+                      model = c("Cambodia_C4_Restrictions.on.gatherings_4",
+                                "Italy_C5_Close.public.transport_1",
+                                "Japan_C6_Stay.at.home.requirements_1",
+                                "Slovakia_C3_Cancel.public.events_2",
+                                "Turkey_C7_Restrictions.on.internal.movement_1"),
+                      julian_lockdown = c(77,71,98,70,78),
+                      aics = NA,
+                      R2 = NA,
+                      t.lockdown = NA)
+
+
+
+# Add the ISO3 for the country names
+corrections$ISO3 <- countrycode(corrections$country, origin = 'country.name', destination = 'iso3c')
+
+# Loop through and extract the values from the selected models
+for (i in 1:8) { 
+  
+  corrections$t.lockdown[i] <- summary(mod.list[[corrections$model[i]]])$p.table["lockdown","t value"]
+  corrections$R2[i] <- summary(mod.list[[corrections$model[i]]])$r.sq
+  corrections$aics[i] <- AIC(mod.list[[corrections$model[i]]])
+}
+
+
+```
+
+
+### Calculate the mean percent change following introduction of confinement measures
+
+```{r}
+library(tidyr)
+# Update the corrected model values
+chosen_start <- bind_rows(corrections, chosen_start) %>%
+  distinct(country, .keep_all = T)
+
+
+apple_all <- left_join(applestart %>% dplyr::select(country, value, ISO3, julian, weekend),
+                        chosen_start %>% dplyr::select(country, ISO3, model, julian_lockdown), 
+                        by = c("country", "ISO3"))
+
+# Remove Taiwan because the country does not show a response to lockdown
+apple_all <- apple_all %>% filter(!country ==  "Taiwan")
+
+# Assign before and after pandemic
+apple_all <- mutate(apple_all, lockdown = ifelse(julian >= julian_lockdown, "After", "Before"))
+
+# Set levels for the model
+apple_all$lockdown <- factor(apple_all$lockdown, levels = c("Before","After"))
+
+# Apple data show change above or below 100 rather than 0, so calculate the percent change from 100
+apple_all$percent <- apple_all$value - 100
+
+# get median change after pandemic 
+mean_after<- apple_all %>% group_by(ISO3, lockdown) %>% 
+  summarise(percent = mean(percent))
+
+# Filter only after the pandemic declared
+mean_after <- filter(mean_after, lockdown == "After")
+
+chosen_start <- left_join(chosen_start, mean_after)
+
+# save chosen models
+write.csv(chosen_start, file="Oct2nd.Applemob.chosen.csv") 
+
+
+```
+
+### Modelling the global percent change
+
+```{r}
+
+mod.drive <- gamm(data = apple_all, percent ~ lockdown + weekend + s(julian), random = list(country=~1))
+
+summary(mod.drive$gam)
+## coefficient = -41.2731
+## error = 0.8939
+## tval = -46.173
+## n = 6820
+
+```
+

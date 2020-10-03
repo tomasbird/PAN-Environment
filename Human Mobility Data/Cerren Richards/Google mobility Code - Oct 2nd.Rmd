@@ -1,0 +1,1038 @@
+---
+title: "PAN-Environment Google mobility code"
+authors: "Cerren Richards & Tom Bird"
+date: "02/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Here we use the Google mobility data to find the t-value for all countries before and after COVID-19 confinements.
+
+### Google Data
+
+**Data Description**:
+
+* How visits and length of stay at different places change compared to a baseline.
+    - Parks: national parks, public beaches, marinas, dog parks, plazas, and public gardens.
+    - Residential: places of residence
+    
+**Baseline**:
+
+* Median value, for the corresponding day of the week, during the 5- week period Jan 3–Feb 6, 2020
+
+**Download data and methods**:
+
+* https://www.google.com/covid19/mobility/
+* https://support.google.com/covid19-mobility/answer/9824897?hl=en&ref_topic=9822927
+
+```{r, eval=FALSE}
+
+# Read in google data
+google <- read.csv("Global_Mobility_Report.csv")
+
+# R reads Namibia's iso2 code is as an "is.na" object, so we will rename it to NA
+google$country_region_code[is.na(google$country_region_code)] <-"NA"
+
+# Add the country codes so we ensure everything matches 
+library(countrycode)
+google$ISO2 <- google$country_region_code
+google$ISO3 <- countrycode(google$ISO2, origin = 'iso2c', destination = 'iso3c')
+google$country <- countrycode(google$ISO2, origin = 'iso2c', destination = 'country.name')
+
+# Add Julian date
+google$julian<- (strptime(google$date, "%Y-%m-%d")$yday) + 1 # need to add 1 day because 2020 is a leap year
+
+library(naniar)
+# remove the subregions and only keep the overall country pattern
+google<- google %>% replace_with_na(replace = list(sub_region_1 = ""))
+google<- google[is.na(google$sub_region_1),]
+
+library(dplyr)
+# Select the columns that will be used in further analyses
+google <- google %>% select(country, ISO3, date, julian, 
+                            residential = residential_percent_change_from_baseline, 
+                            parks = parks_percent_change_from_baseline)
+
+# Sensitivity analysis to identify the best cut off dates
+# We select May because this is when most countries begin to ease the restrictions
+maystart <- 122 # Julian date for May 1st
+maymid <- 136 # May 15
+mayend <- 152 # May 30
+
+# Subset the google data
+googlestart <- subset(google,  julian <= maystart)
+googlemid <- subset(google,  julian <= maymid)
+googleend <- subset(google,  julian <= mayend)
+
+
+```
+
+
+### COVID-19 Confinement Data
+
+The Oxford Covid-19 Government Response Tracker (OxCGRT) has compiled dates for eight different confinement types and their severity (0-4).
+
+Data info: https://github.com/OxCGRT/covid-policy-tracker
+
+```{r, eval=FALSE}
+library(RCurl)
+
+# Call the OxCGRT data from GitHub
+confinement <- getURL("https://raw.githubusercontent.com/OxCGRT/covid-policy-tracker/master/data/OxCGRT_latest_withnotes.csv")
+
+# Set up the confinement data for further analyses
+conf <- read.csv(text=confinement) %>% 
+  mutate(julian=(strptime(Date, "%Y%m%d")$yday)+1) %>% # assign Julian Date
+  mutate(Date=as.Date(strptime(Date, "%Y%m%d"))) %>% # Set as a date 
+  mutate(weekday=weekdays(Date)) %>% # Identify weekdays
+  mutate(weekend=ifelse(grepl("Sat|Sun", weekday), 1,0)) %>% # Assign columns for weekends
+  select(ISO3=CountryCode, RegionName, Date, julian, weekday, weekend, # Select columns
+         C1_School.closing, C2_Workplace.closing, C3_Cancel.public.events,
+         C4_Restrictions.on.gatherings, C5_Close.public.transport,
+         C6_Stay.at.home.requirements, C7_Restrictions.on.internal.movement)
+
+# Remove subregions
+conf<- conf %>% replace_with_na(replace = list(RegionName = ""))
+conf<- conf[is.na(conf$RegionName),]
+
+
+# Join the Google data with the confinement data
+googlestart <- left_join(googlestart, conf, by = c("ISO3", "julian"))
+googlemid <- left_join(googlemid, conf, by = c("ISO3", "julian"))
+googleend <- left_join(googleend, conf, by = c("ISO3", "julian"))
+
+
+```
+
+
+### SENSITIVITY ANALYSIS and Extract t-statistic for each country
+
+We divided each country’s mobility data into ‘before’ and ‘after’ periods for each confinement type and level, ran generalised additive models to determine which division best characterised the observed changes in driving patterns. 
+
+```{r, eval = FALSE}
+
+# List seven of the confinement types 
+conftypes=c("C1_School.closing", "C2_Workplace.closing", "C3_Cancel.public.events",
+            "C4_Restrictions.on.gatherings", "C5_Close.public.transport",
+            "C6_Stay.at.home.requirements", "C7_Restrictions.on.internal.movement")
+
+###_________________________________________
+### MID MAY
+###_________________________________________
+
+# Create empty spaces for results to be pasted
+country=ISO3=restriction=level=date=character() # set as character
+aics=R2=t.lockdown=pval=numeric() # set as numeric
+
+# Create empty dataframes and lists for model outputs
+country.results=subdat.list=chosen_mid=data.frame()
+mod.list=country.results=list()
+
+library(mgcv)
+library(lubridate)
+
+# Run loop to extract the t-statistic
+for(i in unique(googlemid$country)){
+  for(j in conftypes){
+    subdat=subset(googlemid, country==i)  
+    locklevels=unique(subdat[[j]])
+    locklevels=locklevels[which(locklevels %in% c(1:10))]
+    for(k in locklevels){
+      subdat$lockdown=(subdat[[j]]==k)*1
+      subdat$lockdown.type=j
+      subdat$level=k
+      mod=try(gam(residential ~ lockdown + weekend + s(julian), data=subdat))
+      if(!class(mod)[1]=="try-error"){
+        country=c(country,i)
+        ISO3=c(ISO3, subdat$ISO3[1])
+        restriction=c(restriction,j)
+        level=c(level,k)
+        aics=c(aics,AIC(mod))
+        R2=c(R2, summary(mod)$r.sq)
+        t.lockdown=c(t.lockdown, summary(mod)$p.table["lockdown","t value"])
+        pval=c(pval, summary(mod)$p.table["lockdown","Pr(>|t|)"])
+        date=c(date, subdat$date[min(which(subdat$lockdown==1))])
+      
+
+        # save models and subdata
+        mod.list[[paste(i,j,k, sep="_")]]=mod
+        subdat.list=rbind(subdat.list, subset(subdat, 
+                                              select=c("country", "date", "julian", "weekday",
+                                                       "lockdown.type","level",  "residential",
+                                                        "lockdown")))
+        
+      }
+    }
+  }
+  
+  # select country top model
+  country.out=data.frame(country, ISO3, restriction, level, aics, R2, t.lockdown, pval, date) %>%
+    mutate(Date=ymd(date)) %>%
+    subset(country==i) %>% 
+    arrange(aics)
+  
+  country.results=rbind(country.results,country.out)
+  
+  country.out=subset(country.out, t.lockdown==max(t.lockdown))
+  country.out$model = with(country.out, paste(country, restriction, level, sep="_"))
+  
+  # add top model outputs to list
+  chosen_mid=rbind(chosen_mid,country.out)
+  
+  print(paste(i))
+}
+
+# Assign Julian date for the confinement date
+chosen_mid$julian_lockdown <- (strptime(chosen_mid$date, "%Y-%m-%d")$yday) + 1 
+
+chosen_mid<- distinct(chosen_mid, country, .keep_all = TRUE)
+
+# Find median AIC score for all countries
+median(chosen_mid$aics) #447
+
+###_________________________________________
+### END MAY
+###_________________________________________
+
+
+# Create empty spaces for results to be pasted
+country=ISO3=restriction=level=date=character() # set as character
+aics=R2=t.lockdown=pval=numeric() # set as numeric
+
+# Create empty dataframes and lists for model outputs
+country.results=subdat.list=chosen_end=data.frame()
+mod.list=country.results=list()
+
+
+# Run loop to extract the t-statistic
+for(i in unique(googleend$country)){
+  for(j in conftypes){
+    subdat=subset(googleend, country==i)  
+    locklevels=unique(subdat[[j]])
+    locklevels=locklevels[which(locklevels %in% c(1:10))]
+    for(k in locklevels){
+      subdat$lockdown=(subdat[[j]]==k)*1
+      subdat$lockdown.type=j
+      subdat$level=k
+      mod=try(gam(residential ~ lockdown + weekend + s(julian), data=subdat))
+      if(!class(mod)[1]=="try-error"){
+        country=c(country,i)
+        ISO3=c(ISO3, subdat$ISO3[1])
+        restriction=c(restriction,j)
+        level=c(level,k)
+        aics=c(aics,AIC(mod))
+        R2=c(R2, summary(mod)$r.sq)
+        t.lockdown=c(t.lockdown, summary(mod)$p.table["lockdown","t value"])
+        pval=c(pval, summary(mod)$p.table["lockdown","Pr(>|t|)"])
+        date=c(date, subdat$date[min(which(subdat$lockdown==1))])
+      
+
+        # save models and subdata
+        mod.list[[paste(i,j,k, sep="_")]]=mod
+        subdat.list=rbind(subdat.list, subset(subdat, 
+                                              select=c("country", "date", "julian", "weekday",
+                                                       "lockdown.type","level",  "residential",
+                                                        "lockdown")))
+        
+      }
+    }
+  }
+  
+  # select country top model
+  country.out=data.frame(country, ISO3, restriction, level, aics, R2, t.lockdown, pval, date) %>%
+    mutate(Date=ymd(date)) %>%
+    subset(country==i) %>% 
+    arrange(aics)
+  
+  country.results=rbind(country.results,country.out)
+  
+  country.out=subset(country.out, t.lockdown==max(t.lockdown))
+  country.out$model = with(country.out, paste(country, restriction, level, sep="_"))
+  
+  # add top model outputs to list
+  chosen_end=rbind(chosen_end,country.out)
+  
+  print(paste(i))
+}
+
+# Assign Julian date for the confinement date
+chosen_end$julian_lockdown <- (strptime(chosen_end$date, "%Y-%m-%d")$yday) + 1 
+
+
+chosen_end<- distinct(chosen_end, country, .keep_all = TRUE)
+
+# Find median AIC score for all countries
+median(chosen_end$aics) #525
+
+
+###_________________________________________
+### START MAY
+###_________________________________________
+
+# Create empty spaces for results to be pasted
+country=ISO3=restriction=level=date=character() # set as character
+aics=R2=t.lockdown=pval=numeric() # set as numeric
+
+# Create empty dataframes and lists for model outputs
+country.results=subdat.list=chosen_start=data.frame()
+mod.list=country.results=list()
+
+# Run loop to extract the t-statistic
+for(i in unique(googlestart$country)){
+  for(j in conftypes){
+    subdat=subset(googlestart, country==i)  
+    locklevels=unique(subdat[[j]])
+    locklevels=locklevels[which(locklevels %in% c(1:10))]
+    for(k in locklevels){
+      subdat$lockdown=(subdat[[j]]==k)*1
+      subdat$lockdown.type=j
+      subdat$level=k
+      mod=try(gam(residential ~ lockdown + weekend + s(julian), data=subdat))
+      if(!class(mod)[1]=="try-error"){
+        country=c(country,i)
+        ISO3=c(ISO3, subdat$ISO3[1])
+        restriction=c(restriction,j)
+        level=c(level,k)
+        aics=c(aics,AIC(mod))
+        R2=c(R2, summary(mod)$r.sq)
+        t.lockdown=c(t.lockdown, summary(mod)$p.table["lockdown","t value"])
+        pval=c(pval, summary(mod)$p.table["lockdown","Pr(>|t|)"])
+        date=c(date, subdat$date[min(which(subdat$lockdown==1))])
+      
+
+        # save models and subdata
+        mod.list[[paste(i,j,k, sep="_")]]=mod
+        subdat.list=rbind(subdat.list, subset(subdat, 
+                                              select=c("country", "date", "julian", "weekday",
+                                                       "lockdown.type","level",  "residential",
+                                                        "lockdown")))
+        
+      }
+    }
+  }
+  
+  # select country top model
+  country.out=data.frame(country, ISO3, restriction, level, aics, R2, t.lockdown, pval, date) %>%
+    mutate(date=ymd(date)) %>%
+    subset(country==i) %>% 
+    arrange(aics)
+  
+  country.results=rbind(country.results,country.out)
+  
+  country.out=subset(country.out, t.lockdown==max(t.lockdown))
+  country.out$model = with(country.out, paste(country, restriction, level, sep="_"))
+  
+  # add top model outputs to list
+  chosen_start=rbind(chosen_start,country.out)
+  
+  print(paste(i))
+}
+
+# Assign Julian date for the confinement date
+chosen_start$julian_lockdown <- (strptime(chosen_start$date, "%Y-%m-%d")$yday) + 1 
+
+# Remove duplicated countries (that have the same AIC score for multiple confinement types)
+chosen_start<- distinct(chosen_start, country, .keep_all = TRUE)
+
+# Find median AIC score for all countries
+median(chosen_start$aics) #379
+
+
+```
+
+
+### Plot the individual country trends with lockdown date
+
+```{r, eval = FALSE}
+
+# Join the lockdown dates to the full Google data for plotting
+googleplots <- left_join(googlestart, chosen_start, by = c("country", "ISO3"))
+
+library(ggplot2)
+library(ggforce)
+## PLOT
+ggplot(data = googleplots, aes(x=julian, y=residential)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 1)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+ggplot(data = googleplots, aes(x=julian, y=residential)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 2)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+ggplot(data = googleplots, aes(x=julian, y=residential)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 3)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+
+```
+
+
+### Find the date for countries that dont work
+
+The models above did not select appropriate dates. We therefore manually select the dates for the following countries:
+
+"Bahrain", "Belize", "Cambodia","Hong Kong SAR China", "Italy",
+"Indonesia", "Mongolia", "Portugal","South Korea", "Taiwan", "Vietnam","Yemen"
+
+
+```{r}
+# Subset the countries that the model did not select an appropriate confinement date
+
+# Set Julian date
+country.results$julian_lockdown <- (strptime(country.results$date, "%Y-%m-%d")$yday) + 1 
+
+## Bahrain_C2_Workplace.closing_2 = Julian day = 78
+ggplot(data = filter(subdat.list, country == "Bahrain"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Bahrain"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Bahrain"))
+
+
+## Belize_C1_School.closing_3 = Julian day = 80
+ggplot(data = filter(subdat.list, country == "Belize"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Belize"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Belize"))
+
+
+## Cambodia_C2_Workplace.closing_2 = Julian day = 77
+ggplot(data = filter(subdat.list, country == "Cambodia"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Cambodia"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Cambodia"))
+
+
+## Hong Kong SAR China = NOT SUITABLE 
+ggplot(data = filter(subdat.list, country == "Hong Kong SAR China"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Hong Kong SAR China"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Hong Kong SAR China"))
+
+
+## Italy_C5_Close.public.transport_1 = Julian day = 71
+ggplot(data = filter(subdat.list, country == "Italy"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Italy"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Italy"))
+
+
+## Indonesia_C5_Close.public.transport_1 = Julian day = 76
+ggplot(data = filter(subdat.list, country == "Indonesia"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Indonesia"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Indonesia"))
+
+
+## Mongolia_C7_Restrictions.on.internal.movement_2 = Julian day = 52  not sure if can use
+ggplot(data = filter(subdat.list, country == "Mongolia"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Mongolia"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Mongolia"))
+
+
+## Portugal_C2_Workplace.closing_2 = Julian day = 72
+ggplot(data = filter(subdat.list, country == "Portugal"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Portugal"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Portugal"))
+
+
+## South Korea = cant use?
+ggplot(data = filter(subdat.list, country == "South Korea"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "South Korea"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "South Korea"))
+
+## Taiwan = cant use
+ggplot(data = filter(subdat.list, country == "Taiwan"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Taiwan"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Taiwan"))
+
+
+## Vietnam_C2_Workplace.closing_3 = Julian day = 87
+ggplot(data = filter(subdat.list, country == "Vietnam"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Vietnam"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Vietnam"))
+
+
+## Yemen_C3_Cancel.public.events_2 = Julian day = 77 - cant use??
+ggplot(data = filter(subdat.list, country == "Yemen"), aes(x=julian, y=residential)) + 
+  geom_line() + 
+  geom_vline(aes(xintercept=julian_lockdown, colour=restriction), 
+             data = filter(country.results, country == "Yemen"))+
+  geom_text(aes(x=julian_lockdown, y=10 + 2*as.numeric(level), label=level), 
+            data = filter(country.results, country == "Yemen"))
+
+
+
+# We exclude "Hong Kong SAR China","Mongolia", "South Korea", "Taiwan", "Yemen"
+# because they do not show an obvious change in lockdown date
+
+# Extract the model values for the countries that need corrected confinement dates
+corrections <- tibble(country = c("Bahrain", "Belize", "Cambodia", 
+                                  "Italy", "Indonesia", "Portugal",
+                                  "Vietnam"), 
+                      model = c("Bahrain_C2_Workplace.closing_2", "Belize_C1_School.closing_3",
+                                "Cambodia_C2_Workplace.closing_2", "Italy_C5_Close.public.transport_1",
+                                "Indonesia_C5_Close.public.transport_1", "Portugal_C2_Workplace.closing_2",
+                                "Vietnam_C2_Workplace.closing_3"),
+                      julian_lockdown = c(78, 80, 77, 71, 76, 72, 87),
+                      aics = NA,
+                      R2 = NA,
+                      t.lockdown = NA)
+
+# Add the ISO3 for the country names
+corrections$ISO3 <- countrycode(corrections$country, origin = 'country.name', destination = 'iso3c')
+
+# Loop through and extract the values from the selected models
+for (i in 1:7) { 
+
+corrections$t.lockdown[i] <- summary(mod.list[[corrections$model[i]]])$p.table["lockdown","t value"]
+corrections$pval[i] <- summary(mod.list[[corrections$model[i]]])$p.table["lockdown","Pr(>|t|)"]
+corrections$R2[i] <- summary(mod.list[[corrections$model[i]]])$r.sq
+corrections$aics[i] <- AIC(mod.list[[corrections$model[i]]])
+}
+
+library(tidyr)
+# Update the corrected model values
+chosen_residential <- bind_rows(corrections, chosen_start)
+chosen_residential <- distinct(chosen_residential, country, .keep_all = T)
+
+# Remove countries
+chosen_residential <- chosen_residential %>% filter(!country %in% c("Hong Kong SAR China","Mongolia", "South Korea", "Taiwan", "Yemen"))
+
+```
+
+
+
+### Extract t-statistic PARKS
+
+```{r}
+
+# Join the confinement dates to the google data
+googlepark <- left_join(googlestart %>% dplyr::select(country:weekend),
+                 chosen_residential %>% dplyr::select(country, ISO3, model, julian_lockdown), 
+                 by = c("country", "ISO3"))
+
+# Remove countries
+googlepark <- googlepark %>% filter(!country %in% c("Hong Kong SAR China","Mongolia", "South Korea", "Taiwan", "Yemen"))
+
+
+# Assign whether the date is before or after lockdown
+googlepark <- googlepark %>% group_by(country) %>% 
+  mutate(lockdown = ifelse(julian >= julian_lockdown, "After", "Before"))
+
+# Set levels for the model
+googlepark$lockdown <- factor(googlepark$lockdown, levels = c("Before","After"))
+
+# Make a list of all the countries with no subregions
+# This will be called on in the loop below and the tvalues will be placed here
+chosen_parks <- chosen_residential %>% select(country, ISO3, model, date, julian_lockdown)
+
+
+# PARKS MODEL
+
+#Assign NA to all countries
+chosen_parks$t.lockdown <- NA
+chosen_parks$pval <- NA
+chosen_parks$R2 <- NA
+chosen_parks$aics <- NA
+
+# Run GAM model for each country in the no_sub_countries dataframe
+for (i in 1:nrow(chosen_parks)) { 
+ tryCatch({
+
+model <- gam(data=filter(googlepark, country == chosen_parks$country[i]), 
+              parks ~ lockdown + weekend + s(julian))
+
+# Extract the t-value and paste it into the no_sub_countries dataframe
+chosen_parks$t.lockdown[i] <- summary(model)$p.table["lockdownAfter","t value"]
+chosen_parks$pval[i] <- summary(model)$p.table["lockdownAfter","Pr(>|t|)"]
+chosen_parks$R2[i] <- summary(model)$r.sq
+chosen_parks$aics[i] <- AIC(model)
+
+  }, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+
+```
+
+
+
+### PARKS Plot the individual country trends with lockdown date
+
+```{r, eval = FALSE}
+
+# Join the lockdown dates to the full Google data for plotting
+#googleplots <- left_join(google, chosen, by = "country")
+
+library(ggforce)
+## PLOT
+ggplot(data = googlepark, aes(x=julian, y=parks)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 1)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+ggplot(data = googleplots, aes(x=julian, y=parks)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 2)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+ggplot(data = googlepark, aes(x=julian, y=parks)) + 
+  geom_line() + 
+  facet_wrap_paginate(~country, ncol = 7, nrow = 7, scale="free_y", page = 3)+
+  geom_vline(aes(xintercept = julian_lockdown), colour = "red")
+
+
+```
+
+
+
+### Calculate the mean percent change following introduction of confinement measures
+
+```{r, eval=FALSE}
+
+# Assign before and after pandemic
+#googleplots <- mutate(googleplots, lockdown = ifelse(julian >= julian_lockdown, "After", "Before"))
+
+# get median change after pandemic 
+mean_after<- googlepark %>% group_by(ISO3, lockdown) %>% 
+  summarise(mean_res = mean(residential),
+            mean_park = mean(parks))
+
+# Filter only after the pandemic declared
+mean_after <- filter(mean_after, lockdown == "After")
+
+# Join the percent change
+chosen_parks <- left_join(chosen_parks, 
+                 mean_after %>% dplyr::select(percent = mean_park), 
+                 by = c("ISO3"))
+
+chosen_residential <- left_join(chosen_residential, 
+                 mean_after %>% dplyr::select(percent = mean_res), 
+                 by = c("ISO3"))
+
+
+# Revere the direction of residential 
+chosen_residential$percent <- chosen_residential$percent*-1 
+chosen_residential$t.lockdown <- chosen_residential$t.lockdown*-1 
+
+```
+
+
+### Plot Percentage change
+```{r}
+
+# Define increase or decrease
+median_after <- mutate(median_after, increase_res = ifelse(med_res > 0 , "Increase", "Decrease"))
+median_after <- mutate(median_after, increase_park = ifelse(med_park > 0 , "Increase", "Decrease"))
+
+#Join to `world` dataframe (it's in the above R chunk)
+median_after <- left_join(world, median_after)
+
+
+# TWO COLOURS
+ggplot() +
+  theme_void(base_size = 18)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+   geom_sf(data = median_after, aes(fill = increase_park),  colour = "grey20", size = 0.25)+
+  scale_y_continuous(expand = c(0,0), limits = c(-60, 85))+
+  scale_x_continuous(expand = c(0,0), limits = c(-180, 180))+
+  labs(fill = "change at parks")+
+ theme(legend.position = "bottom", legend.box = "vertical")
+
+#CONTINUOUS COLOURS
+ggplot() +
+  theme_void(base_size = 15)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+   geom_sf(data = median_after, aes(fill = med_res),  colour = "grey20", size = 0.25)+
+  scale_y_continuous(expand = c(0,0), limits = c(-60, 85))+
+  scale_x_continuous(expand = c(0,0), limits = c(-180, 180))+
+  theme(axis.title.x=element_blank(), axis.title.y=element_blank())+
+  theme(legend.position = "bottom", legend.box = "vertical")+
+  scale_fill_viridis(option = "D", na.value="grey90",direction = 1,
+  guide = guide_colorbar (title.position = 'top', title.hjust = 0.5, label.hjust = 0.5,
+  barheight = unit(3, units = "mm"), barwidth = unit(100, units = "mm"))) +
+  labs(fill = "Percent change - residential") 
+
+
+ggplot() +
+  theme_void(base_size = 15)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+   geom_sf(data = median_after, aes(fill = med_park),  colour = "grey20", size = 0.25)+
+  scale_y_continuous(expand = c(0,0), limits = c(-60, 85))+
+  scale_x_continuous(expand = c(0,0), limits = c(-180, 180))+
+  theme(axis.title.x=element_blank(), axis.title.y=element_blank())+
+  theme(legend.position = "bottom", legend.box = "vertical")+
+  scale_fill_viridis(option = "D", na.value="grey90", direction = 1,
+  guide = guide_colorbar (title.position = 'top', title.hjust = 0.5, label.hjust = 0.5,
+  barheight = unit(3, units = "mm"), barwidth = unit(100, units = "mm"))) +
+  labs(fill = "Percent change - parks") 
+
+#Percent increase at places of residence after confinement
+
+
+
+
+```
+
+
+## Sort the data ready for the stacked plot
+```{r}
+# assign names to the data
+chosen_parks$type <- "Parks & Beaches"
+chosen_residential$type <- "Residential"
+
+# Join the two google data (parks and residential)
+stacked <- bind_rows(chosen_residential, chosen_parks)
+stacked <- stacked %>% select(country, ISO3, t.lockdown, percent, type)
+
+
+# Read marine traffic data
+boat <- read.csv("eez_ais_change.csv")
+
+# Filter out the territories
+boat <- boat %>% filter(TERRITORY1 == SOVEREIGN1)
+
+# Select the data to keep
+boat <- boat %>% select(country = TERRITORY1, 
+                        percent = change, 
+                        t.lockdown = t_after, 
+                        ISO3 = ISO_SOV1) %>%
+    distinct(country, .keep_all = T)
+
+# Assign name
+boat$type <- "Marine Traffic"
+
+# create a new dataframe
+stacked <- bind_rows(stacked, boat)
+
+
+## Apple data
+apple <- read.csv("Oct2nd.Applemob.chosen.csv")
+apple$type <- "Driving"
+
+# Select data
+apple <- apple %>% select(country, percent,t.lockdown,ISO3, type)
+stacked <- bind_rows(stacked, apple)
+
+
+## Air Traffic
+air <- read.csv("Airtraffic.effects.csv")
+air$type <- "Air Traffic"
+air$country <- countrycode(air$ISO3, origin = 'iso3c', destination = 'country.name')
+air <- air %>% select(country, ISO3, percent = total.Perc.chg, type)
+air$percent <- air$percent*100
+air <- air %>% filter(country != "Egypt")
+stacked <- bind_rows(stacked, air)
+
+
+library(ggplot2);library(viridis); library(ggpubr);library(sf);library("rnaturalearth"); library("rnaturalearthdata")
+# extract continent info
+# data for the world
+world <- ne_countries(scale = "medium", returnclass = "sf")
+world <- world %>% rename(ISO3 = iso_a3) 
+region_un <- world$region_un
+ISO3 <- world$ISO3
+continent<- tibble(ISO3, region_un)
+
+# join to stacked data
+stacked <- left_join(stacked, continent, by = "ISO3") 
+
+# assign Tuvalu to Oceania
+stacked$region_un[is.na(stacked$region_un)] <-"Oceania"
+
+
+# Only keep the countries with all five mobility types
+number <- stacked %>% count(country, sort = TRUE)
+stacked <- left_join(stacked, number) 
+stacked_all <- stacked
+stacked <-stacked %>% filter(n == 5)
+
+
+```
+
+## Create stacked bar plot for the main manuscript
+
+```{r}
+
+# Sum the percentages to allow the ggplot code to plot from highest to lowest
+stacked_sum <- stacked %>% group_by(region_un, country) %>% summarise(sum = sum(percent))
+stacked <- left_join(stacked, stacked_sum)
+
+# Reorder the mobility types
+stacked$type <- factor(stacked$type, levels = c("Residential", "Parks & Beaches", "Driving",
+                                              "Marine Traffic","Air Traffic"))
+
+# continent + flat
+ggplot(data = stacked, aes(x = reorder(country, -sum), y=percent, fill=type)) + 
+    geom_bar(stat="identity")+
+  scale_fill_viridis(discrete=TRUE, direction = -1)+
+    # Set up the plot theme
+  theme_bw(base_size = 15)+
+  theme(panel.grid = element_blank())+ 
+  geom_hline(yintercept = 0)+
+    labs(fill = "")+
+  facet_grid(.~region_un, scales = "free", space = "free")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x = "", y = "Percent Change")+
+    theme(strip.text.x = element_blank(), 
+          strip.background = element_blank())
+
+# Save
+ggsave("stacked.pdf", 
+       dpi = 600, 
+       width = 250, height = 120, unit = "mm")
+
+```
+
+
+## Plot for supplementary
+Plot the percentage change after confinement for each country.
+
+```{r}
+
+# PARKS
+chosen_parks <- left_join(chosen_parks, continent, by = "ISO3") 
+
+ggplot(data = chosen_parks, aes(x = reorder(country, -percent), y=percent)) + 
+    geom_bar(stat="identity")+
+  scale_fill_viridis(discrete=TRUE)+
+    # Set up the plot theme
+  theme_bw(base_size = 15)+
+  theme(panel.grid = element_blank())+ 
+  geom_hline(yintercept = 0)+
+    labs(fill = "")+
+  facet_grid(.~region_un, scales = "free", space = "free")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x = "", y = "Percent Change")+
+  theme(strip.text.x = element_blank(), 
+          strip.background = element_blank()) 
+
+ggsave("Parks.pdf", 
+       dpi = 600, 
+       width = 400, height = 120, unit = "mm")
+
+
+
+# RESIDENTIAL
+chosen_residential <- left_join(chosen_residential, continent, by = "ISO3") 
+
+ggplot(data = chosen_residential, aes(x = reorder(country, -percent), y=percent)) + 
+    geom_bar(stat="identity")+
+  scale_fill_viridis(discrete=TRUE)+
+    # Set up the plot theme
+  theme_bw(base_size = 15)+
+  theme(panel.grid = element_blank())+ 
+  geom_hline(yintercept = 0)+
+    labs(fill = "")+
+  facet_grid(.~region_un, scales = "free", space = "free")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x = "", y = "Percent Change")+
+  theme(strip.text.x = element_blank(), 
+          strip.background = element_blank()) 
+
+ggsave("Residential.pdf", 
+       dpi = 600, 
+       width = 600, height = 120, unit = "mm")
+
+
+# AIR TRAFFIC
+air <- left_join(air, continent, by = "ISO3") 
+
+ggplot(data = air, aes(x = reorder(country, -percent), y=percent)) + 
+    geom_bar(stat="identity")+
+  scale_fill_viridis(discrete=TRUE)+
+    # Set up the plot theme
+  theme_bw(base_size = 15)+
+  theme(panel.grid = element_blank())+ 
+  geom_hline(yintercept = 0)+
+    labs(fill = "")+
+  facet_grid(.~region_un, scales = "free", space = "free")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x = "", y = "Percent Change")+
+  theme(strip.text.x = element_blank(), 
+          strip.background = element_blank()) 
+
+ggsave("Air Traffic.pdf", 
+       dpi = 600, 
+       width = 350, height = 120, unit = "mm")
+
+
+# DRIVING
+apple <- left_join(apple, continent, by = "ISO3") 
+
+ggplot(data = apple, aes(x = reorder(country, -percent), y=percent)) + 
+    geom_bar(stat="identity")+
+  scale_fill_viridis(discrete=TRUE)+
+    # Set up the plot theme
+  theme_bw(base_size = 15)+
+  theme(panel.grid = element_blank())+ 
+  geom_hline(yintercept = 0)+
+    labs(fill = "")+
+  facet_grid(.~region_un, scales = "free", space = "free")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x = "", y = "Percent Change")+
+  theme(strip.text.x = element_blank(), 
+          strip.background = element_blank()) 
+
+ggsave("Driving.pdf", 
+       dpi = 600, 
+       width = 350, height = 120, unit = "mm")
+
+
+# MARINE TRAFFIC
+
+# Read marine traffic data
+boat <- read.csv("eez_ais_change.csv")
+
+# Filter out the territories
+boat <- boat %>% filter(TERRITORY1 == SOVEREIGN1)
+
+boat <- boat %>% select(country = TERRITORY1, 
+                        percent = change, 
+                        t.lockdown = t_after, 
+                        ISO3 = ISO_SOV1) %>%
+    distinct(country, .keep_all = T)
+
+boat <- left_join(boat, continent, by = "ISO3") 
+boat$region_un[is.na(boat$region_un)] <-"Oceania"
+
+
+ggplot(data = boat, aes(x = reorder(country, -percent), y=percent)) + 
+    geom_bar(stat="identity")+
+  scale_fill_viridis(discrete=TRUE)+
+    # Set up the plot theme
+  theme_bw(base_size = 15)+
+  theme(panel.grid = element_blank())+ 
+  geom_hline(yintercept = 0)+
+    labs(fill = "")+
+    facet_grid(.~region_un, scales = "free", space = "free")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x = "", y = "Percent Change")+
+  theme(strip.text.x = element_blank(), 
+          strip.background = element_blank()) 
+
+ggsave("Marine Traffic.pdf", 
+       dpi = 600, 
+       width = 750, height = 160, unit = "mm")
+
+
+## Marine Traffic Territories
+
+# Read marine traffic data
+boat <- read.csv("eez_ais_change.csv")
+
+# Filter out the territories
+boat <- boat %>% filter(TERRITORY1 != SOVEREIGN1)
+
+boat <- boat %>% select(country = TERRITORY1, 
+                        percent = change, 
+                        t.lockdown = t_after, 
+                        ISO3 = ISO_SOV1) %>%
+    distinct(country, .keep_all = T)
+
+boat <- boat %>% filter(country != "Heard and McDonald Islands")
+    
+boat <- left_join(boat, continent, by = "ISO3") 
+
+
+    ggplot(data = boat, aes(x = reorder(country, -percent), y=percent)) + 
+    geom_bar(stat="identity")+
+  scale_fill_viridis(discrete=TRUE)+
+    # Set up the plot theme
+  theme_bw(base_size = 15)+
+  theme(panel.grid = element_blank())+ 
+  geom_hline(yintercept = 0)+
+    labs(fill = "")+
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x = "", y = "Percent Change")+
+  theme(strip.text.x = element_blank(), 
+          strip.background = element_blank()) 
+
+
+ggsave("Marine Traffic - Territories.pdf", 
+       dpi = 600, 
+       width = 450, height = 200, unit = "mm")
+    
+```
+
+
+
+## Modelling the overall percent change across all countries
+
+The model for Apple data has been run in the Apple code.
+
+```{r}
+
+## Marine Traffic
+boat <- read.csv("eez_ais_change.csv")
+
+boat <- boat %>% filter(TERRITORY1 != "Heard and McDonald Islands")
+
+marine.mod <- lme(data = boat, change~1, random=~1|TERRITORY1)
+summary(marine.mod)
+
+# Intercept: -9.393568
+# Error: 1.881711
+# df: 246
+# t-val = -4.992035
+
+
+## Air Traffic
+air.mod <- lme(data = air, percent~1, random=~1|country)
+summary(air.mod)
+
+
+## Residential
+
+#reverse residential percentage
+googlepark$res.rev <- googlepark$residential*-1
+
+mod.res <- gamm(data = googlepark, res.rev ~ lockdown + weekend + s(julian), random = list(country=~1))
+# Intercept: -10.540777
+# Error: 0.2502575
+# df: 9157
+# t-val = -42.11972
+
+
+## Park
+mod.park <- gamm(data = googlepark, parks ~ lockdown + weekend + s(julian), random = list(country=~1))
+
+summary(mod.park$gam)
+
+# Intercept: -19.6368
+# Error: 0.9766
+# df: 9193
+# t-val = -20.106
+
+```

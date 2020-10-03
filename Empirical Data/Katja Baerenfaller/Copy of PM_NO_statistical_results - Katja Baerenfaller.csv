@@ -1,9 +1,0 @@
-;;Model ;p-value ;mean difference;t;df
-Davos;PM2.5;group: before and after, weight: 12*1008 measurements, t.test (weight ~group, paired=TRUE);< 2.2e-16;1.623;28.79;5651
-Davos;PM10 ;group: before and after, weight: 2*1008 measurements, t.test (weight ~group, paired=TRUE);0.01076;1.623;2.5555;961
-Davos;Nox;group: before and after, weight: 2*1008 measurements, t.test (weight ~group, paired=TRUE);1.11E-54;-11.345;-16.657;925
-Davos;NO2;group: before and after, weight: 2*1008 measurements, t.test (weight ~group, paired=TRUE);< 2.2e-16;-9.159;-16.765;925
-St. Moritz;PM2.5;group: before and after, weight: 2*1008 measurements, t.test (weight ~group, paired=TRUE);< 2.2e-16;2.977;15.005;924
-St. Moritz;PM10 ;group: before and after, weight: 2*1008 measurements, t.test (weight ~group, paired=TRUE);1.69E-14;3.408;7.7983;924
-St. Moritz;NOx;group: before and after, weight: 2*1008 measurements, t.test (weight ~group, paired=TRUE);< 2.2e-16;-20.767;-17.171;867
-St. Moritz;NO2;group: before and after, weight: 2*1008 measurements, t.test (weight ~group, paired=TRUE);< 2.2e-16;-15.397;-17.812;867
